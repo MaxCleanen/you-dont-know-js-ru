@@ -12,11 +12,11 @@ Now we turn our attention to expressing async flow control in a sequential, sync
 
 ## Breaking Run-to-Completion
 
-In Chapter 1, we explained an expectation that JS developers almost universally rely on in their code: once a function starts executing, it runs until it completes, and no other code can interrupt and run in between.
+В главе 1, мы объяснили, почему JS-разрабочтики всегда полагаются на свои функции: после того, как функция начала выполняться, она будет выполняться вплоть до своего завершения и никакой другой код не может прервать или вмешаться во время её исполнения.
 
-As bizarre as it may seem, ES6 introduces a new type of function that does not behave with the run-to-completion behavior. This new type of function is called a "generator."
+Хоть это весьма и эксцентрично, но в ES6 представил новый тип функций, который ведёт себя не в run-to-completion стиле. Этот новый тип функций называется "генератор".
 
-To understand the implications, let's consider this example:
+Чтобы понять зачем он нужен, давайте рассмотрим тако пример:
 
 ```js
 var x = 1;
@@ -34,22 +34,25 @@ function bar() {
 foo();					// x: 3
 ```
 
-In this example, we know for sure that `bar()` runs in between `x++` and `console.log(x)`. But what if `bar()` wasn't there? Obviously the result would be `2` instead of `3`.
+В этом примере, мы точно знаем, что `bar()` запустится между `x++` и `console.log(x)`. Но что, если бы `bar()` там не было? Очевидно, результатом была бы `2` вместо `3`.
 
+Теперь давайте поломаем голову. А что если бы функции `bar()` не было, но она каким-то образом могла бы запускаться между операциями `x++` и `console.log(x)`? Возможно ли это?
 Now let's twist your brain. What if `bar()` wasn't present, but it could still somehow run between the `x++` and `console.log(x)` statements? How would that be possible?
+
+В языыках с упреждающей многопоточностью, было бы возможно сделать так чтобы `bar()` "прервал" ход выполнения и выполнился в точности между теми двумя операциями. Но JS не отностися к упреждающим языка, не говоря уже о многопоточности. И тем не менее, определенная форма подобного прерывания (конкуретности) возможна, если бы `foo()` сама могла как-то перевести своё выполнение на "паузу" в этом участке кода.
 
 In **preemptive** multithreaded languages, it would essentially be possible for `bar()` to "interrupt" and run at exactly the right moment between those two statements. But JS is not preemptive, nor is it (currently) multithreaded. And yet, a **cooperative** form of this "interruption" (concurrency) is possible, if `foo()` itself could somehow indicate a "pause" at that part in the code.
 
 **Note:** I use the word "cooperative" not only because of the connection to classical concurrency terminology (see Chapter 1), but because as you'll see in the next snippet, the ES6 syntax for indicating a pause point in code is `yield` -- suggesting a politely *cooperative* yielding of control.
 
-Here's the ES6 code to accomplish such cooperative concurrency:
+ES6 код позволяет обеспечить такую кооперативную конкуренцию:
 
 ```js
 var x = 1;
 
 function *foo() {
 	x++;
-	yield; // pause!
+	yield; // пауза!
 	console.log( "x:", x );
 }
 
@@ -60,6 +63,7 @@ function bar() {
 
 **Note:** You will likely see most other JS documentation/code that will format a generator declaration as `function* foo() { .. }` instead of as I've done here with `function *foo() { .. }` -- the only difference being the stylistic positioning of the `*`. The two forms are functionally/syntactically identical, as is a third `function*foo() { .. }` (no space) form. There are arguments for both styles, but I basically prefer `function *foo..` because it then matches when I reference a generator in writing with `*foo()`. If I said only `foo()`, you wouldn't know as clearly if I was talking about a generator or a regular function. It's purely a stylistic preference.
 
+А теперь мы можем использовать предыдущий код, чтобы запустить `bar()` в том месте где объявлен `yield` внутри `*foo()`:
 Now, how can we run the code in that previous snippet such that `bar()` executes at the point of the `yield` inside of `*foo()`?
 
 ```js
@@ -74,8 +78,16 @@ x;						// 3
 it.next();				// x: 3
 ```
 
+ОК, к этому моменту мы уже увидели достаточно новых и потенциально сбивающих с толку вещей, пришло время разобраться с ними. Но прежде чем погрузиться в разнообразие механик/синтакса внутри ES6 генераторов, давайти пробежимся по следующим шага.
 OK, there's quite a bit of new and potentially confusing stuff in those two code snippets, so we've got plenty to wade through. But before we explain the different mechanics/syntax with ES6 generators, let's walk through the behavior flow:
 
+1. Операция `it = foo()` пока что *не* выполняет генератор `*foo()`, а всего лишь создаёт *итератор*, который будет контоллировать выполнение. Подробнее итераторы рассмотрим чуть позднее.
+2. Первыая операция `it.next()` запускает генератор `*foo()`, который проходит через операцию `x++` в первой строке `*foo()`.
+3. `*foo()` приостанавливается на `yield`, на этом моменте вызов `it.next()` заканчивается. В этот момент `*foo()` всё ещё работает и активна, но поставлена на паузу.
+4. Мы проверили значение `x`, и оно равно `2`.
+5. Мы вызываем `bar()`, которая снова увеличивает `x` с помощью `x++`.
+6. Проверяем значине `x`, теперь оно `3`.
+7. Последний `it.next()` вызывает продолжение генератора `*foo()`, с того места, где он был поставлен на паузу. Выполняется выражение `console.log(..)`, которое печатает нам значение `x` равным `3`
 1. The `it = foo()` operation does *not* execute the `*foo()` generator yet, but it merely constructs an *iterator* that will control its execution. More on *iterators* in a bit.
 2. The first `it.next()` starts the `*foo()` generator, and runs the `x++` on the first line of `*foo()`.
 3. `*foo()` pauses at the `yield` statement, at which point that first `it.next()` call finishes. At the moment, `*foo()` is still running and active, but it's in a paused state.
@@ -84,12 +96,14 @@ OK, there's quite a bit of new and potentially confusing stuff in those two code
 6. We inspect the value of `x` again, and it's now `3`.
 7. The final `it.next()` call resumes the `*foo()` generator from where it was paused, and runs the `console.log(..)` statement, which uses the current value of `x` of `3`.
 
+Проясним ещё раз. `*foo()` началась, но не выполнилась до конца, а приостановилась на `yield`. Мы продолжили `*foo()` далее, чтобы она закончилась, но этого даже не требовалось.
 Clearly, `*foo()` started, but did *not* run-to-completion -- it paused at the `yield`. We resumed `*foo()` later, and let it finish, but that wasn't even required.
 
+Итак, генератор это специальный тип функция, который может останавливаться и продолжаться один или более раз, и даже не обязан заканчиваться. 
 So, a generator is a special kind of function that can start and stop one or more times, and doesn't necessarily ever have to finish. While it won't be terribly obvious yet why that's so powerful, as we go throughout the rest of this chapter, that will be one of the fundamental building blocks we use to construct generators-as-async-flow-control as a pattern for our code.
 
 ### Input and Output
-
+Как мы только что сказали, генераторы это специальный функций с особой моделью выполнения. Но они всё так же остаются функциями, а это значит, им присущи те же постулаты, а именно -- они всё так же принимают аргументы(input-ы) bи они по прежнему возвращают некоторое значение (Output):
 A generator function is a special function with the new processing model we just alluded to. But it's still a function, which means it still has some basic tenets that haven't changed -- namely, that it still accepts arguments (aka "input"), and that it can still return a value (aka "output"):
 
 ```js
@@ -103,22 +117,28 @@ var res = it.next();
 
 res.value;		// 42
 ```
-
+Мы передали `6` и `7` в арументы `*foo(..)` и `*foo(..)` вернула `42` вызывающему коду.
 We pass in the arguments `6` and `7` to `*foo(..)` as the parameters `x` and `y`, respectively. And `*foo(..)` returns the value `42` back to the calling code.
 
+Теперь видно, в чём разница между выполнением генератора и обычой функции. Разумеется, вызов `foo(6,7)` выглядит понятнее. Но нюанс в том, что генератор `*foo(..)` еще не запустился, в отличие от обычной функции.
 We now see a difference with how the generator is invoked compared to a normal function. `foo(6,7)` obviously looks familiar. But subtly, the `*foo(..)` generator hasn't actually run yet as it would have with a function.
 
+Вместо этого, мы всего лишь создали *итератор*, который присвоили переменной `it`, чтобы управлять поведением генератора. После, мы вызывали `it.next()`, который дал указание генератору выполняться с текущего местоположения до завершения либо до ближайшей иструкции `yield`.
 Instead, we're just creating an *iterator* object, which we assign to the variable `it`, to control the `*foo(..)` generator. Then we call `it.next()`, which instructs the `*foo(..)` generator to advance from its current location, stopping either at the next `yield` or end of the generator.
+
 
 The result of that `next(..)` call is an object with a `value` property on it holding whatever value (if anything) was returned from `*foo(..)`. In other words, `yield` caused a value to be sent out from the generator during the middle of its execution, kind of like an intermediate `return`.
 
+Пока оставим в стороне вопрос о том, зачем нам нужен этот косвенный объект-*итератор*, управляющий генератором. Доберемся и до этого, я обещаю.
 Again, it won't be obvious yet why we need this whole indirect *iterator* object to control the generator. We'll get there, I *promise*.
 
+#### Итерационные сообщения
 #### Iteration Messaging
 
+В дополнение к возможностям генератора принимать аргументы и возвращаться значения, есть две более мощные и неотразимые возможности генератора принимать и отдавать сообщения, посредством `yield` и `next(..)`.
 In addition to generators accepting arguments and having return values, there's even more powerful and compelling input/output messaging capability built into them, via `yield` and `next(..)`.
 
-Consider:
+Предположим:
 
 ```js
 function *foo(x) {
@@ -136,22 +156,31 @@ var res = it.next( 7 );
 res.value;		// 42
 ```
 
+Сначала, мы передадим `6` в `x`. Затем вызовем `it.next()`, который запустит `*foo(..)`.
 First, we pass in `6` as the parameter `x`. Then we call `it.next()`, and it starts up `*foo(..)`.
 
+Внутри `*foo(..)`, начнет выполняться выражение `var y = x ..`, но затем оно дойдёт до выражения `yield`. В этот момент, `*foo(..)` встанет на пааузу (прямо внутри выражения присваивания!), и сделат запрос к вызывающему коду с просьбой предоставить значение для выражения  `yield`. Затем, мы вызовем `it.next( 7 )`, что передаст значение `7`, которое станет значением выражения `yield`.
 Inside `*foo(..)`, the `var y = x ..` statement starts to be processed, but then it runs across a `yield` expression. At that point, it pauses `*foo(..)` (in the middle of the assignment statement!), and essentially requests the calling code to provide a result value for the `yield` expression. Next, we call `it.next( 7 )`, which is passing the `7` value back in to *be* that result of the paused `yield` expression.
 
+На этом этапе, выражение присваивания по сути сводится к выржению `var y = 6 * 7`. И теперь, `return y` вернёт значение `42`, которое теперь является результатом вызова `it.next( 7 )`.
 So, at this point, the assignment statement is essentially `var y = 6 * 7`. Now, `return y` returns that `42` value back as the result of the `it.next( 7 )` call.
 
+Обратите внимание на кое-что очень важное, хоть и запутанное, даже для опытных JS разработчиков: в зависимости от вашей точки зрения, будет иметь место несоответствие между вызовами `yield` и `next(..)`. В целом, вам потребуется на одно `next(..)` больше чем `yield` -- представленный кусок кода имеет 1 `yeild` и два `next()`.
 Notice something very important but also easily confusing, even to seasoned JS developers: depending on your perspective, there's a mismatch between the `yield` and the `next(..)` call. In general, you're going to have one more `next(..)` call than you have `yield` statements -- the preceding snippet has one `yield` and two `next(..)` calls.
 
+Откуда несоответствие?
 Why the mismatch?
 
+Потому что первый `next(..)` всегда запускает генерратор и бежит вплоть до первого `yield`. Но именно второй  `next(..)` обрабатывает первое "замершее" `yield`, второй `next(..)` обработает третий `yield` и так далее.
 Because the first `next(..)` always starts a generator, and runs to the first `yield`. But it's the second `next(..)` call that fulfills the first paused `yield` expression, and the third `next(..)` would fulfill the second `yield`, and so on.
 
+##### Сказка о Двух Вопросах
 ##### Tale of Two Questions
 
+Вообще говоря, в зависимости от того, с какой строны вы рассматриваете код в первую очередь, вышеупомянутое несоответствие будет вам казаться таковым либо нет.
 Actually, which code you're thinking about primarily will affect whether there's a perceived mismatch or not.
 
+Представим только код генератора:
 Consider only the generator code:
 
 ```js
@@ -159,14 +188,19 @@ var y = x * (yield);
 return y;
 ```
 
+**Первый** `yield` *задаёт вопрос*: "Какое значение я должен здесь вставить?"
 This **first** `yield` is basically *asking a question*: "What value should I insert here?"
 
+Кто будет отвечать на этот вопрос? Очевидно, **первый** `next()` уже был вызван к этому моменто, поэтому он не может ответить на этот вопрос. Поэтому, **второй** `next()` должен знать ответ на вопрос **первого** `yield`.
 Who's going to answer that question? Well, the **first** `next()` has already run to get the generator up to this point, so obviously *it* can't answer the question. So, the **second** `next(..)` call must answer the question *posed* by the **first** `yield`.
 
+Видите несоответствие?
 See the mismatch -- second-to-first?
 
+Теперь давайте поменяем точку зрения с точки зрения генератора на точку зрения итератора.
 But let's flip our perspective. Let's look at it not from the generator's point of view, but from the iterator's point of view.
 
+Чтобы правильно проиллюстрировать эту точку зрения, мы также дожны объяснить что сообщения могут ходить  в обе стороны относительно `yield`. `yield ..` может посылать сообщения `next(..)`, а `next(..)` могут посылать значения поставленным на паузу `yield`. Теперь немного подправим наш код:
 To properly illustrate this perspective, we also need to explain that messages can go in both directions -- `yield ..` as an expression can send out messages in response to `next(..)` calls, and `next(..)` can send values to a paused `yield` expression. Consider this slightly adjusted code:
 
 ```js
@@ -184,8 +218,10 @@ res = it.next( 7 );		// pass `7` to waiting `yield`
 res.value;				// 42
 ```
 
+`yield ..` и `next(..)` вместе обеспечивают систему двустороннего обмена сообщениями  **в ходже выполнения генератора**.
 `yield ..` and `next(..)` pair together as a two-way message passing system **during the execution of the generator**.
 
+Теперь, глядя только на код *итератора*:
 So, looking only at the *iterator* code:
 
 ```js
@@ -198,24 +234,38 @@ res.value;				// 42
 
 **Note:** We don't pass a value to the first `next()` call, and that's on purpose. Only a paused `yield` could accept such a value passed by a `next(..)`, and at the beginning of the generator when we call the first `next()`, there **is no paused `yield`** to accept such a value. The specification and all compliant browsers just silently **discard** anything passed to the first `next()`. It's still a bad idea to pass a value, as you're just creating silently "failing" code that's confusing. So, always start a generator with an argument-free `next()`.
 
+Первый `next()` (без параметров) просто *задает вопрос*: "Какое *следующее* значение генератор `*foo(..)` вернет мне?". А кто ответит на этот вопрос? Первое выражение `yield "hello"`.
+
+Видите? Здесь нет расхождения.
+
 The first `next()` call (with nothing passed to it) is basically *asking a question*: "What *next* value does the `*foo(..)` generator have to give me?" And who answers this question? The first `yield "hello"` expression.
 
 See? No mismatch there.
 
+Взависимости от того, кого вы представляете в роли *вопрошающoго*, рассинхрон между `yield` и `next(..)` есть или нет.
 Depending on *who* you think about asking the question, there is either a mismatch between the `yield` and `next(..)` calls, or not.
+
+Но стойте! Есть же ещё последний вызов `next()`, для которого нет соответсвующего `yield`. Последний вызов `it.next(7)` опять спрашивает вопрос о *следующем* значении генератора, но больше не осталось `yield`, не так ли? Кто же ответит?
+
+Выражение `return` ответит!
 
 But wait! There's still an extra `next()` compared to the number of `yield` statements. So, that final `it.next(7)` call is again asking the question about what *next* value the generator will produce. But there's no more `yield` statements left to answer, is there? So who answers?
 
 The `return` statement answers the question!
 
+Но если в вашем генераторе **нет `return`**? Хотя `return` не являеется обязательным атрибутом кода генератора, в отличие от кода обычных функций, в нем всегда неявно присутствует  `return;` (aka `return undefined;`), который и является ответчиком на вопрос, задаваемый последним вызовом `it.next(7)` .
 And if there **is no `return`** in your generator -- `return` is certainly not any more required in generators than in regular functions -- there's always an assumed/implicit `return;` (aka `return undefined;`), which serves the purpose of default answering the question *posed* by the final `it.next(7)` call.
 
+Все эти вопросы и ответы -- механика двухстороннего обмена между `yield` и `next(..)` являются эффективной и мощной техникой, но пока совсем не понятно, каким образом это касается управления асинхронным кодом. Скоро увидим это!
 These questions and answers -- the two-way message passing with `yield` and `next(..)` -- are quite powerful, but it's not obvious at all how these mechanisms are connected to async flow control. We're getting there!
 
+### Множественные Итераторы
 ### Multiple Iterators
 
+Может показаться, по крайней мере исходя из синтаксиса, что *итератор* непосредственно управляет самой функцией генератора. Но здесь тонкий нюсан, который лего упустить: всякий раз, создавая *итератор*, вы создаете *экземляр* генератора, подвластный данному итератору.
 It may appear from the syntactic usage that when you use an *iterator* to control a generator, you're controlling the declared generator function itself. But there's a subtlety that's easy to miss: each time you construct an *iterator*, you are implicitly constructing an instance of the generator which that *iterator* will control.
 
+Вы можете иметь множество экземпляров одного и того же генератора, выполняющихся в одно и то же время, и они даже могут взаимодействовать:
 You can have multiple instances of the same generator running at the same time, and they can even interact:
 
 ```js
@@ -245,19 +295,22 @@ it2.next( val1 / 4 );					// y:10
 
 **Warning:** The most common usage of multiple instances of the same generator running concurrently is not such interactions, but when the generator is producing its own values without input, perhaps from some independently connected resource. We'll talk more about value production in the next section.
 
+Давайте быстро пробежимся по процессу:
 Let's briefly walk through the processing:
 
-1. Both instances of `*foo()` are started at the same time, and both `next()` calls reveal a `value` of `2` from the `yield 2` statements, respectively.
-2. `val2 * 10` is `2 * 10`, which is sent into the first generator instance `it1`, so that `x` gets value `20`. `z` is incremented from `1` to `2`, and then `20 * 2` is `yield`ed out, setting `val1` to `40`.
-3. `val1 * 5` is `40 * 5`, which is sent into the second generator instance `it2`, so that `x` gets value `200`. `z` is incremented again, from `2` to `3`, and then `200 * 3` is `yield`ed out, setting `val2` to `600`.
-4. `val2 / 2` is `600 / 2`, which is sent into the first generator instance `it1`, so that `y` gets value `300`, then printing out `20 300 3` for its `x y z` values, respectively.
-5. `val1 / 4` is `40 / 4`, which is sent into the second generator instance `it2`, so that `y` gets value `10`, then printing out `200 10 3` for its `x y z` values, respectively.
+1. Оба экземпляра `*foo()` стартовали одновременно, и оба `next()` получили значение `value` равным `2` от соответствующих выражений `yield 2`.
+2. `val2 * 10` т.е.`2 * 10`, передается в первый экземляр генератора `it1`, поэтому `x`имеет занчение `20`. `z` к тому времени увеличилось с `1` до `2`, таким образом `yield` отдает назад `20 * 2`, значение `val1` становится `40`.
+3. Выражение `val1 * 5` равняется `40 * 5`, оно посылается второму экземпляру генератора `it2`, поэтому `x` теперь равен `200`. `z` увеличилось ещё раз, на этоот раз с `2` до `3`, и теперь `yield` возвращает `200 * 3`, значение `val2` становится `600`.
+4. Выражение `val2 / 2` равняется `600 / 2`, посылается первому экземпляру генератора `it1`, теперь `y` равен `300`, после чего генератор печатает значени своих `x y z`, соответственно `20 300 3`.
+5. Выражение `val1 / 4` равянется `40 / 4`, посылается второму экземпляру генератора `it2`, теперь `y` равен `10`, после чего генератор печатает значени своих `x y z`, соответственно `200 10 3`.
 
+Такой вот "весёлый" пример для лучшего усвоения. Вы хорошо усвоили?
 That's a "fun" example to run through in your mind. Did you keep it straight?
 
+#### Чередование
 #### Interleaving
 
-Recall this scenario from the "Run-to-completion" section of Chapter 1:
+Вспомним этот пример из раздела "Run-to-completion" главы 1:
 
 ```js
 var a = 1;
@@ -276,8 +329,10 @@ function bar() {
 }
 ```
 
+В обычных функциях JS, безусловно, либо сперва `foo()` выполнится полноценно, либо `bar()`, но `foo()` никак не сможет перемежать свои инструкции с `bar()`. Поэтому возможно только два возможных итога у представленной программы.
 With normal JS functions, of course either `foo()` can run completely first, or `bar()` can run completely first, but `foo()` cannot interleave its individual statements with `bar()`. So, there are only two possible outcomes to the preceding program.
 
+Однако, при помощью генераторов, перемежение инструкций (даже внутри выражений) возможно:
 However, with generators, clearly interleaving (even in the middle of statements!) is possible:
 
 ```js
@@ -298,9 +353,12 @@ function *bar() {
 	b = a * (yield 2);
 }
 ```
+В зависимости от порядка вызовов итераторов для `*foo()` и `*bar()`, представленная программа может дать множестворазных результатов.
+Другими словами, мы можем легко проиллюстрировать (пускай и в стиле самодеятельности) теорию "гонки потоков", описаную в главе 1, с помощью перемежения двух генераторов использующих общие переменные.
 
 Depending on what respective order the *iterators* controlling `*foo()` and `*bar()` are called, the preceding program could produce several different results. In other words, we can actually illustrate (in a sort of fake-ish way) the theoretical "threaded race conditions" circumstances discussed in Chapter 1, by interleaving the two generator interations over the same shared variables.
 
+Для начала, создадим вспомогательную функцию `step(..)`, управляющую *итератором*:
 First, let's make a helper called `step(..)` that controls an *iterator*:
 
 ```js
